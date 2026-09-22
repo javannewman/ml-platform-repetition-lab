@@ -1,0 +1,42 @@
+{
+  "family": "equipment-failure-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::147161676554:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "equipment-api",
+      "image": "147161676554.dkr.ecr.us-east-2.amazonaws.com/equipment-failure-api:cloud-v1",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "MODEL_VERSION",
+          "value": "1"
+        },
+        {
+          "name": "RELEASE_VERSION",
+          "value": "cloud-v1"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/equipment-failure-api",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

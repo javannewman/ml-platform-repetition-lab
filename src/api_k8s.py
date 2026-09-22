@@ -1,27 +1,30 @@
+import joblib
 import logging
 import os
 import time
 
-import mlflow
-import mlflow.sklearn
 import pandas as pd
 
 from fastapi import FastAPI, Request
-from mlflow import MlflowClient
 from pydantic import BaseModel, Field
 
 
-# -------------------------------------------------
-# MLFLOW CONFIGURATION
-# -------------------------------------------------
+MODEL_FILE = "models/equipment_failure_model.joblib"
 
-TRACKING_URI = os.getenv(
-    "MLFLOW_TRACKING_URI",
-    "http://127.0.0.1:5000",
+MODEL_VERSION = os.getenv(
+    "MODEL_VERSION",
+    "1",
 )
 
-MODEL_NAME = "equipment-failure-model"
-MODEL_ALIAS = "champion"
+RELEASE_VERSION = os.getenv(
+    "RELEASE_VERSION",
+    "local",
+)
+
+POD_NAME = os.getenv(
+    "HOSTNAME",
+    "local",
+)
 
 FEATURE_COLUMNS = [
     "temperature",
@@ -40,65 +43,36 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 
-logger = logging.getLogger("equipment-api")
-
-
-# -------------------------------------------------
-# CONNECT TO MLFLOW
-# -------------------------------------------------
-
-mlflow.set_tracking_uri(
-    TRACKING_URI
+logger = logging.getLogger(
+    "equipment-api"
 )
 
-client = MlflowClient()
-
 
 # -------------------------------------------------
-# FIND THE CHAMPION MODEL VERSION
+# LOAD APPROVED MODEL
 # -------------------------------------------------
 
-model_version_info = client.get_model_version_by_alias(
-    MODEL_NAME,
-    MODEL_ALIAS,
-)
-
-MODEL_VERSION = model_version_info.version
-
-
-# -------------------------------------------------
-# LOAD THE CHAMPION MODEL
-# -------------------------------------------------
-
-MODEL_URI = (
-    f"models:/{MODEL_NAME}@{MODEL_ALIAS}"
-)
-
-model = mlflow.sklearn.load_model(
-    MODEL_URI
+model = joblib.load(
+    MODEL_FILE
 )
 
 logger.info(
-    "Loaded model=%s version=%s alias=%s",
-    MODEL_NAME,
+    "Loaded model version=%s release=%s pod=%s",
     MODEL_VERSION,
-    MODEL_ALIAS,
+    RELEASE_VERSION,
+    POD_NAME,
 )
 
 
 # -------------------------------------------------
-# CREATE FASTAPI APPLICATION
+# FASTAPI
 # -------------------------------------------------
 
 app = FastAPI(
     title="Equipment Failure Prediction API",
-    version="1.0.0",
+    version=RELEASE_VERSION,
 )
 
-
-# -------------------------------------------------
-# SIMPLE MONITORING COUNTERS
-# -------------------------------------------------
 
 REQUEST_COUNT = 0
 PREDICTION_COUNT = 0
@@ -124,21 +98,26 @@ async def monitor_requests(
 
     try:
 
-        response = await call_next(request)
+        response = await call_next(
+            request
+        )
 
         duration_ms = (
-            time.perf_counter() - start_time
+            time.perf_counter()
+            - start_time
         ) * 1000
 
         if response.status_code >= 400:
             ERROR_COUNT += 1
 
         logger.info(
-            "method=%s path=%s status=%s duration_ms=%.2f",
+            "method=%s path=%s status=%s "
+            "duration_ms=%.2f pod=%s",
             request.method,
             request.url.path,
             response.status_code,
             duration_ms,
+            POD_NAME,
         )
 
         return response
@@ -147,15 +126,9 @@ async def monitor_requests(
 
         ERROR_COUNT += 1
 
-        duration_ms = (
-            time.perf_counter() - start_time
-        ) * 1000
-
         logger.exception(
-            "Unhandled error method=%s path=%s duration_ms=%.2f",
-            request.method,
-            request.url.path,
-            duration_ms,
+            "Unhandled request error pod=%s",
+            POD_NAME,
         )
 
         raise
@@ -196,10 +169,12 @@ class PredictionResponse(BaseModel):
 
     failure: int
     model_version: str
+    release_version: str
+    pod_name: str
 
 
 # -------------------------------------------------
-# HEALTH ENDPOINT
+# HEALTH
 # -------------------------------------------------
 
 @app.get("/health")
@@ -208,14 +183,14 @@ def health():
     return {
         "status": "healthy",
         "model_loaded": True,
-        "model_name": MODEL_NAME,
-        "model_version": str(MODEL_VERSION),
-        "model_alias": MODEL_ALIAS,
+        "model_version": MODEL_VERSION,
+        "release_version": RELEASE_VERSION,
+        "pod_name": POD_NAME,
     }
 
 
 # -------------------------------------------------
-# PREDICTION ENDPOINT
+# PREDICTION
 # -------------------------------------------------
 
 @app.post(
@@ -233,28 +208,22 @@ def predict_equipment_failure(
         columns=FEATURE_COLUMNS,
     )
 
-    # INFERENCE HAPPENS HERE
     prediction = model.predict(
         input_data
     )[0]
 
     PREDICTION_COUNT += 1
 
-    logger.info(
-        "prediction=%s model_version=%s alias=%s",
-        prediction,
-        MODEL_VERSION,
-        MODEL_ALIAS,
-    )
-
     return {
         "failure": int(prediction),
-        "model_version": str(MODEL_VERSION),
+        "model_version": MODEL_VERSION,
+        "release_version": RELEASE_VERSION,
+        "pod_name": POD_NAME,
     }
 
 
 # -------------------------------------------------
-# BASIC MONITORING ENDPOINT
+# METRICS
 # -------------------------------------------------
 
 @app.get("/metrics")
@@ -264,7 +233,7 @@ def metrics():
         "requests_total": REQUEST_COUNT,
         "successful_predictions_total": PREDICTION_COUNT,
         "errors_total": ERROR_COUNT,
-        "model_name": MODEL_NAME,
-        "model_version": str(MODEL_VERSION),
-        "model_alias": MODEL_ALIAS,
+        "model_version": MODEL_VERSION,
+        "release_version": RELEASE_VERSION,
+        "pod_name": POD_NAME,
     }

@@ -1,0 +1,20 @@
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local MLflow runtime data
+mlflow.db
+mlruns/
+mlartifacts/
+
+# AWS local credentials/configuration
+.aws/
+
+# Environment files / secrets
+.env
+.env.*
+
+# OS/editor junk
+.DS_Store
